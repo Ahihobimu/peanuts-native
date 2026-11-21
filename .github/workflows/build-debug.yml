@@ -1,0 +1,98 @@
+name: Peanuts Native Debug APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: peanuts-debug
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Android Debug APK
+    runs-on: macos-15
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Android NDK
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;28.2.13676358" \
+            "cmake;3.22.1"
+
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Check environment
+        run: |
+          java -version
+          python3 --version
+          dotnet --version
+          cmake --version
+          ninja --version
+          zsh --version
+
+      - name: Build on-device packer
+        run: |
+          zsh android/ondevice/build.sh \
+            "$RUNNER_TEMP/peanuts-packer" all
+
+      - name: Build Peanuts APK
+        working-directory: android/app
+        run: |
+          chmod +x gradlew
+
+          ./gradlew --no-daemon \
+            -PnxApp=peanuts \
+            -PnxGenericHost=true \
+            -PnxLsfg=true \
+            -PnxPackStage="$RUNNER_TEMP/peanuts-packer/stage" \
+            apk
+
+      - name: Find APK
+        run: |
+          mkdir -p "$RUNNER_TEMP/apk"
+          find android/app/out \
+            -type f -name '*.apk' \
+            -exec cp {} "$RUNNER_TEMP/apk/" \;
+
+          test -n "$(find "$RUNNER_TEMP/apk" -name '*.apk' -print -quit)"
+          ls -lh "$RUNNER_TEMP/apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Peanuts-Native-Debug-APK
+          path: ${{ runner.temp }}/apk/*.apk
+          if-no-files-found: error
+          retention-days: 14
