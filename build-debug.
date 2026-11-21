@@ -1,0 +1,99 @@
+
+name: Peanuts Native Debug APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'dm/**'
+      - 'peanuts/**'
+      - 'scripts/**'
+      - '.github/workflows/build-debug.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: peanuts-debug-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Peanut Native Debug APK
+    runs-on: macos-15
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK and tools
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;28.2.13676358" \
+            "cmake;3.22.1"
+
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Check build tools
+        run: |
+          java -version
+          dotnet --version
+          cmake --version
+          python3 --version
+          zsh --version
+
+      - name: Build native Android packer
+        run: |
+          zsh android/ondevice/build.sh \
+            "$RUNNER_TEMP/peanuts-ondevice" all
+
+      - name: Build Peanut Native Debug APK
+        working-directory: android/app
+        run: |
+          chmod +x gradlew
+
+          ./gradlew \
+            --no-daemon \
+            -PnxApp=peanuts \
+            -PnxGenericHost=true \
+            -PnxLsfg=true \
+            -PnxPackStage="$RUNNER_TEMP/peanuts-ondevice/stage" \
+            assembleDebug
+
+      - name: Check APK
+        run: |
+          mkdir -p artifacts
+          find android/app/build/outputs/apk/debug \
+            -name '*.apk' -type f -exec cp {} artifacts/ \;
+
+          test -n "$(find artifacts -name '*.apk' -print -quit)"
+
+          ls -lh artifacts/
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Peanuts-Native-Turbo3-Debug-APK
+          path: artifacts/*.apk
+          if-no-files-found: error
+          retention-days: 14
